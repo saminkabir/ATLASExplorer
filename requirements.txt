@@ -5,5 +5,5 @@ numpy
 seaborn
 plotly
 networkx
-scipy==1.12.0
+scipy
 autorank
