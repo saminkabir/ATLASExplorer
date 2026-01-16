@@ -13,16 +13,46 @@ st.set_page_config(page_title="EasySimilaeitySearch")
 
 with st.sidebar:
     st.markdown('# VisSimilaritySearch Engine')
-    st.markdown('## Please Select :point_down:') 
-    metric_name = st.selectbox('Evaluation Measure', constant.list_measures)
-    
-    container_dataset = st.container()  
-    all_dataset = st.checkbox("Select all", key='all_dataset')
-    if all_dataset: datasets = container_dataset.multiselect('Select Datasets', constant.datasets, constant.datasets)
-    else: datasets = container_dataset.multiselect('Select Datasets', constant.datasets)
-    
-    container_algorithms = st.container() 
-    algorithms = container_dataset.multiselect('Select Algorithms', constant.models)
+    st.markdown('## Please Select :point_down:')
+
+    metric_name = st.selectbox(
+        "Evaluation Measure",
+        constant.list_measures,
+        key="metric_name"
+    )
+
+    # Clear the "other" dataset widget state when switching measures
+    if metric_name == "WCSR (Critical Diagram)":
+        st.session_state.pop("dataset_single", None)
+    else:
+        st.session_state.pop("dataset_multi", None)
+
+    # Dataset selection:
+    # - ONLY Critical Diagram => multiple datasets
+    # - Everything else => exactly one dataset
+    if metric_name == "WCSR (Critical Diagram)":
+        all_dataset = st.checkbox("Select all", key="all_dataset_multi")
+
+        datasets = st.multiselect(
+            "Select Datasets",
+            options=constant.datasets,
+            default=constant.datasets if all_dataset else [],
+            key="dataset_multi"
+        )
+    else:
+        ds = st.selectbox(
+            "Select Dataset",
+            options=constant.datasets,
+            key="dataset_single"
+        )
+        datasets = [ds]  # always a list of length 1
+
+    # Algorithms (keep as-is; you can add the same idea if needed)
+    algorithms = st.multiselect(
+        "Select Algorithms",
+        constant.models,
+        key="algorithms_multi"
+    )
     
 
 tab_desc, tab_benchmark, tab_eva = st.tabs(["Overview", "Benchmark", "Evaluation"]) 
