@@ -36,7 +36,7 @@ with st.sidebar:
         datasets = st.multiselect(
             "Select Datasets",
             options=constant.datasets,
-            default=constant.datasets if all_dataset else [],
+            default= [],
             key="dataset_multi"
         )
     else:
