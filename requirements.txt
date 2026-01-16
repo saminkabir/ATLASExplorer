@@ -3,7 +3,7 @@ streamlit
 matplotlib
 numpy==1.26.4
 seaborn
-plotly
-networkx
-scipy
-autorank
+plotly==6.5.2
+networkx==3.6.1
+scipy==1.17.0
+autorank==1.3.0
