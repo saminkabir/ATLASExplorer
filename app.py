@@ -212,7 +212,7 @@ with tab_desc:
     st.markdown(constant.Contributors)
     
 with tab_benchmark:
-    st.markdown('#### Taxonomy of Automated Solutions for TSAD')
+    st.markdown('#### Taxonomy of ANNS Methods for ATLAS')
     image = Image.open('figures/final_paper-taxonomy_newcolor.png')
     st.image(image)
 
