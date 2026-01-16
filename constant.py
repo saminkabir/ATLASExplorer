@@ -3,7 +3,7 @@ description_intro = f"""
 Similarity search enables efficient retrieval of vectors similar to a query and underpins applications such as retrieval-augmented generation, recommendation systems, and pattern recognition. Although approximate nearest neighbor search (ANNS) methods now dominate due to their strong efficiency–accuracy trade-offs, existing studies remain fragmented, often missing important algorithmic families, recent advances, diverse datasets, and rigorous statistical validation. ATLASExplorer is a web-based interactive engine that provides unified access to the most comprehensive ANNS benchmark to date, supporting statistical analysis of 43 methods across 58 heterogeneous datasets and intuitive visual exploration of accuracy–runtime trade-offs. The system further enables quantitative comparison from recall–runtime curves using the Weighted Cumulative Speedup over Recall (WCSR) measure, ensuring fair evaluation over overlapping operating regions. By integrating large-scale benchmarking, visual analytics, and statistically grounded evaluation in a single platform, ATLASExplorer offers a practical, reproducible, and user-friendly framework for analyzing, comparing, and selecting similarity search methods.
 
 
-* Github repo: https://github.com/saminkabir/ATLAS-benchmark
+* Github repo: https://github.com/TheDatumOrg/ATLAS-benchmark
 
 """
 
