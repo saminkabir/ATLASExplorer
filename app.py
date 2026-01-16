@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 
 import data.utils as data_utils
 import constant
-st.set_page_config(page_title="EasySimilaeitySearch")
+st.set_page_config(page_title="ATLASExplorer")
 
 
 with st.sidebar:
-    st.markdown('# VisSimilaritySearch Engine')
+    st.markdown('# ATLASExplorer Engine')
     st.markdown('## Please Select :point_down:')
 
     metric_name = st.selectbox(
@@ -31,7 +31,7 @@ with st.sidebar:
     # - ONLY Critical Diagram => multiple datasets
     # - Everything else => exactly one dataset
     if metric_name == "WCSR (Critical Diagram)":
-        all_dataset = st.checkbox("Select all", key="all_dataset_multi")
+        # all_dataset = st.checkbox("Select all", key="all_dataset_multi")
 
         datasets = st.multiselect(
             "Select Datasets",
@@ -157,7 +157,7 @@ def visualize_critical_diagram(dataset,algorithms):
         df = pd.DataFrame(auc, index=critical_datasets)
         result = autorank(df, alpha=0.05, verbose=False, force_mode="nonparametric")
         fig = plt.figure(figsize=(8, 2))
-        ax = plot_stats(result, ax=fig.gca(),allow_insignificant=False)
+        ax = plot_stats(result, ax=fig.gca(),allow_insignificant=True)
         st.pyplot(fig, clear_figure=False)
     elif len(dataset) == 1 and len(algorithms) >= 2:
         wcsr_data, _ = data_utils.get_data_for_critical_diagram(dataset, algorithms)
@@ -200,7 +200,21 @@ def visualize_critical_diagram(dataset,algorithms):
             st.plotly_chart(fig, use_container_width=True)
         
 
+with tab_desc:
+    st.markdown("## 🏄 Dive into ATLASExplorer")
+    image = Image.open('figures/final_paper-engine-overview.png')
+    st.image(image)
+    st.markdown(constant.description_intro)
+    st.markdown("#### User Manual")
+    image = Image.open('figures/final_paper-demo_functions.png')
+    st.image(image, caption='The main frames of ATLASExplorer Engine')
+    st.markdown(constant.User_Manual)
+    st.markdown(constant.Contributors)
     
+with tab_benchmark:
+    st.markdown('#### Taxonomy of Automated Solutions for TSAD')
+    image = Image.open('figures/final_paper-taxonomy_newcolor.png')
+    st.image(image)
 
 with tab_eva:
     st.markdown('#### Evaluation measure: {}'.format(metric_name))

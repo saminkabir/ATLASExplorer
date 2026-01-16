@@ -1,33 +1,57 @@
+import os
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
 from autorank import autorank, plot_stats
 from scipy.stats import ttest_rel
-import pandas as pd
+
 
 def pareto_frontier(x, y, maximize_x=True, maximize_y=True):
     """
-    STRICT Pareto frontier in 2D using sort-and-scan, robust to duplicate x's.
-
-    Strict here means: after sorting by x (best to worst), we only keep a point
-    if it STRICTLY improves y over all previously kept points.
+    STRICT Pareto frontier in 2D using sort-and-scan, robust to:
+      - duplicate x
+      - NaN/inf in x or y  (this was causing your crash)
+      - empty inputs
     """
 
-    x = np.asarray(x)
-    y = np.asarray(y)
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
     if x.shape != y.shape:
         raise ValueError("x and y must have the same shape")
 
+    # ✅ Filter NaN/inf pairs FIRST (fixes uniq_x containing nan)
+    mask = np.isfinite(x) & np.isfinite(y)
+    x = x[mask]
+    y = y[mask]
+
+    # ✅ If nothing left, return empty (prevents any reduction crash)
+    if x.size == 0:
+        return np.array([]), np.array([])
+
     # 1) Collapse duplicates in x: keep best y for each x
-    #    (otherwise points with same x can cause confusing behavior)
     uniq_x = np.unique(x)
     best_y_for_x = np.empty_like(uniq_x, dtype=float)
 
+    # Default value if something weird happens (shouldn’t after finite-mask)
+    default = (-np.inf if maximize_y else np.inf)
+
     for i, xv in enumerate(uniq_x):
         ys = y[x == xv]
-        best_y_for_x[i] = ys.max() if maximize_y else ys.min()
+
+        # ✅ extra guard (safe even if nan somehow slips in)
+        if ys.size == 0:
+            best_y_for_x[i] = default
+        else:
+            best_y_for_x[i] = ys.max() if maximize_y else ys.min()
 
     points = np.column_stack([uniq_x, best_y_for_x])
+
+    # Remove any default rows (optional safety)
+    keep = np.isfinite(points[:, 1])
+    points = points[keep]
+    if points.size == 0:
+        return np.array([]), np.array([])
 
     # 2) Sort by x in desired direction
     order = np.argsort(points[:, 0])
@@ -35,64 +59,97 @@ def pareto_frontier(x, y, maximize_x=True, maximize_y=True):
         order = order[::-1]
     points = points[order]
 
-    # 3) Strict scan by y (compare to best-so-far y)
+    # 3) Strict scan by y
     pareto = []
     if maximize_y:
         best_y = -np.inf
         for xv, yv in points:
-            if yv > best_y:          # STRICT improvement
+            if yv > best_y:  # STRICT improvement
                 pareto.append((xv, yv))
                 best_y = yv
     else:
         best_y = np.inf
         for xv, yv in points:
-            if yv < best_y:          # STRICT improvement
+            if yv < best_y:  # STRICT improvement
                 pareto.append((xv, yv))
                 best_y = yv
 
     pareto = np.array(pareto, dtype=float)
+    if pareto.size == 0:
+        return np.array([]), np.array([])
+
+    # Return sorted increasing recall (nicer for interpolation/integration)
+    s = np.argsort(pareto[:, 0])
+    pareto = pareto[s]
     return pareto[:, 0], pareto[:, 1]
 
-import os
 
-def get_recall_data(dataset,model,pareto=True,refinement=1):
-    print(os.getcwd())
+def get_recall_data(dataset, model, pareto=True, refinement=1):
+    """
+    Returns (recall, qps) as numpy arrays (possibly empty).
+    Robust to missing dataset/model and NaN/inf rows.
+    """
+    # NOTE: you print cwd in your current version; keeping it is noisy in Streamlit
+    # print(os.getcwd())
+
     df = pd.read_csv("data/processed/processed_polyvector_results_filtered.csv")
-    df=df[(df["dataset"] == dataset) & (df["model"] == model)]
-    recall,qps = df['recall'].tolist(),df['qps'].tolist()
-    if len(recall)==0:
-        return recall,qps
-    if pareto:
-        recall,qps=pareto_frontier(recall,qps)
-    return recall,qps
+    df = df[(df["dataset"] == dataset) & (df["model"] == model)]
 
-def get_data_for_speedup_recall_graph(dataset,algorithms):
-    recalls=[]
-    qpss=[]
-    models=[]
-    refine2_models=set(['scann'])
-    refine5_models=set(['VAQ'])
+    if df.empty:
+        return np.array([]), np.array([])
+
+    # ✅ Drop NaN/inf pairs early (prevents pareto crash)
+    df = df[["recall", "qps"]].replace([np.inf, -np.inf], np.nan).dropna()
+    if df.empty:
+        return np.array([]), np.array([])
+
+    recall = df["recall"].to_numpy(dtype=float)
+    qps = df["qps"].to_numpy(dtype=float)
+
+    if pareto:
+        recall, qps = pareto_frontier(recall, qps)
+
+    return np.asarray(recall, dtype=float), np.asarray(qps, dtype=float)
+
+
+def get_data_for_speedup_recall_graph(dataset, algorithms):
+    recalls = []
+    qpss = []
+    models = []
+
+    refine2_models = set(["scann"])
+    refine5_models = set(["VAQ"])
+
     for algorithm in algorithms:
-        refinex=1
+        refinex = 1
         if algorithm in refine2_models:
-            refinex=2
+            refinex = 2
         if algorithm in refine5_models:
-            refinex=5
-        r,q=get_recall_data(dataset,algorithm,refinement=refinex)
-        for i in range(0,len(r)):
-            recalls.append(r[i])
-            qpss.append(q[i])
-            models.append(algorithm)
-    df = pd.DataFrame({
-        "recall": recalls,
-        "qps": qpss,
-        "model": models
-    })
-    return df
+            refinex = 5
+
+        r, q = get_recall_data(dataset, algorithm, refinement=refinex)
+
+        # ✅ Missing pair => just skip points for the curve plot
+        if r.size == 0:
+            continue
+
+        recalls.extend(r.tolist())
+        qpss.extend(q.tolist())
+        models.extend([algorithm] * len(r))
+
+    return pd.DataFrame({"recall": recalls, "qps": qpss, "model": models})
+
 
 def auc_qps_recall(recall, qps, r_min=0.0, r_max=1.0):
-    recall = np.array(recall, dtype=float)
-    qps = np.array(qps, dtype=float)
+    """
+    AUC of QPS over recall in [r_min, r_max].
+    Returns 0.0 if not enough points.
+    """
+    recall = np.asarray(recall, dtype=float)
+    qps = np.asarray(qps, dtype=float)
+
+    if recall.size < 2 or qps.size < 2:
+        return 0.0
 
     # sort
     order = np.argsort(recall)
@@ -100,50 +157,42 @@ def auc_qps_recall(recall, qps, r_min=0.0, r_max=1.0):
     qps = qps[order]
 
     # clip range to available domain
-    r_min = max(r_min, recall[0])
-    r_max = min(r_max, recall[-1])
+    r_min = max(r_min, float(recall[0]))
+    r_max = min(r_max, float(recall[-1]))
+    if not (r_min < r_max):
+        return 0.0
 
     # create clipped recall grid including boundaries
     r_new = [r_min]
-    q_new = [np.interp(r_min, recall, qps)]
+    q_new = [float(np.interp(r_min, recall, qps))]
 
     for r, q in zip(recall, qps):
         if r_min < r < r_max:
-            r_new.append(r)
-            q_new.append(q)
+            r_new.append(float(r))
+            q_new.append(float(q))
 
     r_new.append(r_max)
-    q_new.append(np.interp(r_max, recall, qps))
+    q_new.append(float(np.interp(r_max, recall, qps)))
 
-    r_new = np.array(r_new)
-    q_new = np.array(q_new)
+    r_new = np.asarray(r_new, dtype=float)
+    q_new = np.asarray(q_new, dtype=float)
 
-    # integrate
-    return np.trapz(q_new, r_new)
-
+    return float(np.trapz(q_new, r_new))
 
 
 def get_data_for_critical_diagram(datasets, algorithms):
     """
-    Per-dataset behavior:
-      - We try to compute the maximally-overlapped recall interval [minp, maxp]
-        across ALL selected algorithms on that dataset.
-      - If the interval exists (minp < maxp): compute AUC per algorithm on [minp, maxp].
-      - If the interval does NOT exist (minp >= maxp): we still keep the dataset and
-        assign AUC=0.0 to ONLY the algorithm(s) responsible for breaking the overlap
-        (the blockers). All other algorithms get their AUC computed on the overlap
-        of the remaining algorithms (i.e., after excluding the blockers).
-        If even after removing the blockers there is still no overlap, we fall back
-        to assigning 0.0 to all algorithms for that dataset.
+    Robust critical-diagram/WCSR data:
 
-    Also returns a nonoverlap_report dict for debugging/UI.
+    - Missing (dataset, model) pairs => treated as 0.0 (lowest performer)
+    - Overlap interval computed among AVAILABLE models only
+    - If no overlap among available models => all 0.0 for that dataset
 
-    Requires:
-      - get_recall_data(dataset, algorithm, refinement=1) -> (r_list, q_list)
-      - auc_qps_recall(r_list, q_list, minp, maxp) -> float
+    Returns:
+      critical_auc: dict(model -> list of values aligned with critical_datasets)
+      critical_datasets: list of datasets actually included
     """
 
-    # --- your refinement mapping ---
     refine2_models = {"scann"}
     refine5_models = {"VAQ"}
 
@@ -154,152 +203,47 @@ def get_data_for_critical_diagram(datasets, algorithms):
             return 5
         return 1
 
-    def _bounds(r_list):
-        return (min(r_list), max(r_list))
-
-    def _intersection_interval(bounds_dict, subset_algs):
-        """bounds_dict[a] = (min_r, max_r)"""
-        minp = max(bounds_dict[a][0] for a in subset_algs)
-        maxp = min(bounds_dict[a][1] for a in subset_algs)
-        return minp, maxp
-
-    def diagnose_nonoverlap(bounds_dict, eps=1e-12):
-        """
-        bounds_dict[a] = (min_r, max_r)
-        Returns overlap interval and which algorithms are blockers (responsible).
-        """
-        mins = {a: bounds_dict[a][0] for a in bounds_dict}
-        maxs = {a: bounds_dict[a][1] for a in bounds_dict}
-
-        max_of_mins = max(mins.values())
-        min_of_maxs = min(maxs.values())
-
-        has_overlap = (max_of_mins + eps) < min_of_maxs
-
-        lower_blockers = [a for a, v in mins.items() if abs(v - max_of_mins) <= eps]
-        upper_blockers = [a for a, v in maxs.items() if abs(v - min_of_maxs) <= eps]
-
-        blockers = sorted(set(lower_blockers + upper_blockers))
-
-        return {
-            "mins": mins,
-            "maxs": maxs,
-            "intersection": (max_of_mins, min_of_maxs),
-            "has_overlap": has_overlap,
-            "lower_blockers": lower_blockers,
-            "upper_blockers": upper_blockers,
-            "blockers": blockers,
-        }
-
-    # --- main computation ---
-    mp = {}  # (dataset, algorithm) -> (r, q)
-    critical_auc = {}  # algorithm -> list of auc values (aligned with critical_datasets)
+    # dataset->algorithm->(r,q)
+    mp = {}
+    critical_auc = {a: [] for a in algorithms}
     critical_datasets = []
-    nonoverlap_report = {}  # dataset -> diagnostics
 
     for dataset in datasets:
-        # 1) load all curves + bounds for this dataset
-        bounds = {}
+        # Load curves, track which ones exist
+        available = []
+        bounds = {}  # algorithm -> (minr, maxr)
+
         for algorithm in algorithms:
             refinex = _refinement_for(algorithm)
             r, q = get_recall_data(dataset, algorithm, refinement=refinex)
             mp[(dataset, algorithm)] = (r, q)
-            bounds[algorithm] = _bounds(r)
 
-        # 2) compute global overlap across all algorithms
-        minp_all, maxp_all = _intersection_interval(bounds, algorithms)
+            if r.size >= 2:
+                available.append(algorithm)
+                bounds[algorithm] = (float(np.min(r)), float(np.max(r)))
+
+        # If nothing available, skip dataset entirely (or include all zeros; your call)
+        if len(available) == 0:
+            continue
+
+        # Compute overlap on available algorithms
+        minp = max(bounds[a][0] for a in available)
+        maxp = min(bounds[a][1] for a in available)
 
         critical_datasets.append(dataset)
 
-        # Ensure lists exist and we'll append exactly one value per dataset
-        for algorithm in algorithms:
-            critical_auc.setdefault(algorithm, [])
-
-        # Case A: overlap exists across all -> normal behavior
-        if minp_all < maxp_all:
-            for algorithm in algorithms:
-                r, q = mp[(dataset, algorithm)]
-                v = auc_qps_recall(r, q, minp_all, maxp_all)
-                critical_auc[algorithm].append(v)
-            nonoverlap_report[dataset] = {
-                "status": "ok",
-                "interval_used": (minp_all, maxp_all),
-                "blockers": [],
-            }
-            continue
-
-        # Case B: no overlap across all -> find blockers and compute on "others" interval
-        info = diagnose_nonoverlap(bounds)
-        blockers = info["blockers"]
-
-        # Compute overlap among NON-blockers (the "rest")
-        remaining = [a for a in algorithms if a not in blockers]
-
-        # If everybody is a blocker (edge case), no remaining
-        if len(remaining) == 0:
+        # No overlap => everyone gets 0.0
+        if not (minp < maxp):
             for algorithm in algorithms:
                 critical_auc[algorithm].append(0.0)
-            nonoverlap_report[dataset] = {
-                "status": "no_overlap_all_blockers",
-                "global_intersection": info["intersection"],
-                "lower_blockers": info["lower_blockers"],
-                "upper_blockers": info["upper_blockers"],
-                "blockers": blockers,
-                "interval_used_for_nonblockers": None,
-            }
             continue
 
-        minp_rest, maxp_rest = _intersection_interval(bounds, remaining)
-
-        # If remaining still has no overlap, fall back to all zeros
-        if not (minp_rest < maxp_rest):
-            for algorithm in algorithms:
-                critical_auc[algorithm].append(0.0)
-            nonoverlap_report[dataset] = {
-                "status": "no_overlap_even_without_blockers",
-                "global_intersection": info["intersection"],
-                "lower_blockers": info["lower_blockers"],
-                "upper_blockers": info["upper_blockers"],
-                "blockers": blockers,
-                "interval_used_for_nonblockers": (minp_rest, maxp_rest),
-            }
-            continue
-
-        # Otherwise:
-        #   - blockers get 0.0 (lowest performers)
-        #   - non-blockers get real AUC on the remaining overlap interval
+        # Overlap exists => compute AUC for available, 0.0 for missing
         for algorithm in algorithms:
-            if algorithm in blockers:
+            r, q = mp[(dataset, algorithm)]
+            if r.size < 2:
                 critical_auc[algorithm].append(0.0)
             else:
-                r, q = mp[(dataset, algorithm)]
-                v = auc_qps_recall(r, q, minp_rest, maxp_rest)
-                critical_auc[algorithm].append(v)
-
-        nonoverlap_report[dataset] = {
-            "status": "no_overlap_fixed_by_zeroing_blockers",
-            "global_intersection": info["intersection"],
-            "lower_blockers": info["lower_blockers"],
-            "upper_blockers": info["upper_blockers"],
-            "blockers": blockers,
-            "interval_used_for_nonblockers": (minp_rest, maxp_rest),
-        }
+                critical_auc[algorithm].append(auc_qps_recall(r, q, minp, maxp))
 
     return critical_auc, critical_datasets
-
-
-                
-                
-                
-                
-            
-
-# df = pd.read_csv("processed/processed_polyvector_results.csv")
-# datasets=set(df["dataset"])
-# models=set(df["model"])
-# print(datasets)
-# print(models)
-# xx=[]
-# for model in models:
-#     xx.append((model,1))
-# print(xx)
