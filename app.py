@@ -152,13 +152,50 @@ def visualize_graph(dataset,algorithms):
 
 def visualize_critical_diagram(dataset,algorithms):
     if len(dataset)>1:
-        auc,critical_datasets=data_utils.get_data_for_critical_diagram(dataset,algorithms)
-        print(auc,critical_datasets)
+        auc,critical_datasets = data_utils.get_data_for_critical_diagram(dataset,algorithms)
         df = pd.DataFrame(auc, index=critical_datasets)
+
+        # ---- Critical diagram ----
         result = autorank(df, alpha=0.05, verbose=False, force_mode="nonparametric")
         fig = plt.figure(figsize=(8, 2))
-        ax = plot_stats(result, ax=fig.gca(),allow_insignificant=True)
+        plot_stats(result, ax=fig.gca(), allow_insignificant=True)
         st.pyplot(fig, clear_figure=False)
+
+        # ================================
+        # Boxplot of RANKS per algorithm
+        # ================================
+
+        # Convert WCSR/AUC to per-dataset ranks (1 = best)
+        rank_df = df.rank(axis=1, ascending=False, method="average")
+
+        # Long format
+        long_rank = (
+            rank_df.reset_index(names="dataset")
+                .melt(id_vars="dataset", var_name="algorithm", value_name="rank")
+                .dropna()
+        )
+
+        st.markdown("##### Per-Algorithm Rank Distribution Across Datasets")
+
+        fig_box = px.box(
+            long_rank,
+            x="algorithm",
+            y="rank",
+            points="all"
+        )
+
+        # Best ranks at top
+        fig_box.update_yaxes(
+            autorange="reversed",
+            title="Rank (1 = Best)"
+        )
+
+        fig_box.update_layout(
+            xaxis_title="Algorithm",
+            margin=dict(t=40)
+        )
+
+        st.plotly_chart(fig_box, use_container_width=True)
     elif len(dataset) == 1 and len(algorithms) >= 2:
         wcsr_data, _ = data_utils.get_data_for_critical_diagram(dataset, algorithms)
         print(wcsr_data)
@@ -178,7 +215,7 @@ def visualize_critical_diagram(dataset,algorithms):
             # 1-column "heatmap": rows=models, col=WCSR
             heat_df = df_wcsr.set_index("model")[["wcsr"]]
 
-            import plotly.express as px
+            # import plotly.express as px
 
             fig = px.imshow(
                 heat_df,
